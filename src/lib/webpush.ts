@@ -75,11 +75,11 @@ export async function sendPushToAll(payload: PushNotificationPayload) {
 
 export async function sendFireAlarmNotification(reading: SensorReading) {
   const payload: PushNotificationPayload = {
-    title: "🚨 ALARM KEBAKARAN AKTIF! 🚨",
-    body: `PERINGATAN: Relay aktif! Suhu: ${reading.suhu.toFixed(1)}°C, Kelembaban: ${reading.humidity.toFixed(1)}%. Bahaya kebakaran terdeteksi!`,
+    title: "🚨 PERINGATAN! ALARM KEBAKARAN MASIH AKTIF! 🚨",
+    body: `BAHAYA MASIH TERDETEKSI! Suhu: ${reading.suhu.toFixed(1)}°C, Kelembaban: ${reading.humidity.toFixed(1)}%. Segera evakuasi & periksa lokasi!`,
     icon: "/icons/icon-192x192.png",
     badge: "/icons/icon-192x192.png",
-    tag: "hydrowarn-fire-alarm",
+    tag: `hydrowarn-fire-alarm-${Date.now()}`,
     vibrate: [500, 200, 500, 200, 500, 200, 500],
     requireInteraction: true,
     data: {

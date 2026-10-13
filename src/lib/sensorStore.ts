@@ -22,7 +22,6 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const MAX_HISTORY = 30;
-const ALARM_COOLDOWN_MS = 30000; // 30 seconds cooldown between repeat push notifications if relay stays on
 
 export function recordSensorReading(reading: {
   suhu: number;
@@ -40,26 +39,19 @@ export function recordSensorReading(reading: {
     timestamp: Date.now(),
   };
 
-  const wasRelayActive = store.lastRelayState;
   const isRelayActive = current.relay;
+  // Deteksi kondisi bahaya: jika relay aktif ATAU suhu >= 33°C ATAU kelembaban >= 30%
+  const isDanger = isRelayActive || current.suhu >= 33.0 || current.humidity >= 30.0;
   const now = Date.now();
-  const timeSinceLastAlarm = now - store.lastAlarmTime;
 
   let shouldNotify = false;
   let reason = "";
 
-  if (isRelayActive) {
-    if (!wasRelayActive) {
-      // Just triggered (transition from OFF to ON) -> notify immediately
-      shouldNotify = true;
-      reason = "Relay baru saja aktif (Transisi OFF -> ON)";
-      store.lastAlarmTime = now;
-    } else if (timeSinceLastAlarm > ALARM_COOLDOWN_MS) {
-      // Still ON after cooldown window -> re-notify
-      shouldNotify = true;
-      reason = `Relay masih aktif (Pemberitahuan berkala setelah ${Math.round(ALARM_COOLDOWN_MS / 1000)} detik)`;
-      store.lastAlarmTime = now;
-    }
+  // SELAMA MASIH BAHAYA: Kirim spam push notif di setiap paket data yang masuk!
+  if (isDanger) {
+    shouldNotify = true;
+    reason = `BAHAYA MASIH BERLANGSUNG (Suhu: ${current.suhu.toFixed(1)}°C, Kelembaban: ${current.humidity.toFixed(1)}%, Relay: ${isRelayActive ? "ON" : "OFF"}) -> Spam Notifikasi Push`;
+    store.lastAlarmTime = now;
   }
 
   // Update store state
@@ -77,7 +69,11 @@ export function getSensorStatus() {
   return {
     latest: store.latest,
     history: store.history,
-    isAlarmActive: Boolean(store.latest?.relay),
+    isAlarmActive: Boolean(
+      store.latest?.relay ||
+      (store.latest?.suhu !== undefined && store.latest.suhu >= 33.0) ||
+      (store.latest?.humidity !== undefined && store.latest.humidity >= 30.0)
+    ),
     lastAlarmAt: store.lastAlarmTime > 0 ? store.lastAlarmTime : null,
   };
 }
