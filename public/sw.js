@@ -42,21 +42,7 @@ self.addEventListener("push", (event) => {
     ],
   };
 
-  event.waitUntil(
-    self.registration.showNotification(title, options).then(() => {
-      // Otomatis tutup/matikan notifikasi setelah 5 detik
-      setTimeout(async () => {
-        try {
-          const notifications = await self.registration.getNotifications({
-            tag: options.tag,
-          });
-          notifications.forEach((notification) => notification.close());
-        } catch (e) {
-          console.warn("Could not auto-close notification:", e);
-        }
-      }, 5000);
-    })
-  );
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener("notificationclick", (event) => {

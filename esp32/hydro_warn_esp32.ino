@@ -4,10 +4,9 @@
  * =========================================================================
  * Deskripsi:
  * - Membaca sensor suhu & kelembaban (DHT22 dengan fallback DHT11).
- * - Menyalakan Relay fisik jika suhu >= 33.0 °C ATAU kelembaban >= 30.0 %.
- * - Relay fisik otomatis MATI setelah 5 detik agar buzzer/alat tidak rusak.
- * - SELAMA KONDISI MASIH BAHAYA: ESP32 terus mengirim status bahaya (relay=true)
- *   tiap 5 detik sehingga server terus SPAM PUSH NOTIFICATION ke HP pengguna.
+ * - Relay fisik AKTIF TERUS selama suhu >= 33.0 °C ATAU kelembaban >= 70.0 %.
+ * - Relay fisik MATI jika kondisi kembali normal.
+ * - Mengirim HTTP POST HANYA SEKALI saat transisi state (Aman -> Bahaya atau Bahaya -> Aman).
  * =========================================================================
  */
 
@@ -19,50 +18,45 @@
 // -------------------------------------------------------------------------
 // 1. Konfigurasi WiFi
 // -------------------------------------------------------------------------
-const char* ssid     = "NAMA_WIFI_KAMU";      // Ganti dengan SSID WiFi Anda
-const char* password = "PASSWORD_WIFI_KAMU";  // Ganti dengan Password WiFi Anda
+const char* ssid     = "josjis";      // SSID WiFi
+const char* password = "12345678";    // Password WiFi
 
 // -------------------------------------------------------------------------
 // 2. Konfigurasi Endpoint Server
 // -------------------------------------------------------------------------
-const char* serverUrl = "https://hydrowarn.vercel.app/api/sensor";
+const char* serverUrl = "https://hydro-warn.vercel.app/api/sensor";
 
 // -------------------------------------------------------------------------
 // 3. Konfigurasi Pin Hardware
 // -------------------------------------------------------------------------
 #define DHT11_PIN  4      // Pin Data DHT11
 #define DHT22_PIN  5      // Pin Data DHT22
-#define RELAY_PIN  18     // Pin Kendali Relay (Aktuator)
+#define RELAY_PIN  18     // Pin Kendali Relay
 
-// Tipe Sensor DHT
 #define DHT11_TYPE DHT11
 #define DHT22_TYPE DHT22
 
-// Inisialisasi Objek Sensor
 DHT dht11(DHT11_PIN, DHT11_TYPE);
 DHT dht22(DHT22_PIN, DHT22_TYPE);
 
 // -------------------------------------------------------------------------
-// 4. Parameter Ambang Batas (Threshold) & Logika Relay
+// 4. Parameter Ambang Batas (Threshold) & Konfigurasi Relay
 // -------------------------------------------------------------------------
-const float AMBANG_SUHU_TRIGGER   = 33.0; // Pemicu Suhu >= 33.0 °C
-const float AMBANG_LEMBAP_TRIGGER = 30.0; // Pemicu Kelembapan >= 30.0 %
+const float AMBANG_SUHU_TRIGGER   = 33.0; // Suhu >= 33.0 °C
+const float AMBANG_LEMBAP_TRIGGER = 70.0; // Kelembapan >= 70.0 %
 
 // Modul relay umumnya Aktif LOW
 #define RELAY_ON   LOW
 #define RELAY_OFF  HIGH
 
 // -------------------------------------------------------------------------
-// 5. Timer Non-Blocking & Kontrol Alarm Otomatis Mati 5 Detik
+// 5. Timer Non-Blocking & State Tracking
 // -------------------------------------------------------------------------
 unsigned long previousMillis = 0;
-const unsigned long intervalKirim = 5000; // Kirim data setiap 5 detik
+const unsigned long intervalBacaSensor = 2500; // Cek sensor tiap 2.5 detik agar responsif
 
-// Durasi relay fisik berbunyi 5 detik (5000 ms)
-const unsigned long DURASI_ALARM_NYALA = 5000;
-bool alarmSedangAktif = false;
-unsigned long waktuAlarmMulai = 0;
-bool kondisiBahayaSebelumnya = false;
+// Flag status untuk mendeteksi perubahan kondisi (Edge Detection)
+bool statusBahayaSebelumnya = false;
 
 // -------------------------------------------------------------------------
 // Fungsi: Koneksi WiFi
@@ -88,7 +82,7 @@ void hubungkanWiFi() {
 }
 
 // -------------------------------------------------------------------------
-// Fungsi: Kirim Payload JSON ke Endpoint Vercel
+// Fungsi: Kirim Payload JSON ke Endpoint
 // -------------------------------------------------------------------------
 void kirimDataJson(float suhu, float hum, bool relayState) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -109,13 +103,13 @@ void kirimDataJson(float suhu, float hum, bool relayState) {
   http.setTimeout(10000);
   http.addHeader("Content-Type", "application/json");
 
-  // Format payload JSON: {"suhu": 34.2, "humidity": 31.0, "relay": true}
   String payload = "{\"suhu\":" + String(suhu, 1) + 
                    ",\"humidity\":" + String(hum, 1) + 
                    ",\"relay\":" + (relayState ? "true" : "false") + "}";
 
-  Serial.println("[HTTP] Mengirim data ke: " + String(serverUrl));
-  Serial.println("[HTTP] Payload: " + payload);
+  Serial.println("\n[HTTP] >>> Mengirim event perubahan state ke server...");
+  Serial.println("[HTTP] Endpoint : " + String(serverUrl));
+  Serial.println("[HTTP] Payload  : " + payload);
 
   int httpResponseCode = http.POST(payload);
 
@@ -123,7 +117,7 @@ void kirimDataJson(float suhu, float hum, bool relayState) {
     Serial.print("[HTTP] Response Code: ");
     Serial.println(httpResponseCode);
     String response = http.getString();
-    Serial.println("[HTTP] Server Response: " + response);
+    Serial.println("[HTTP] Response Body: " + response);
   } else {
     Serial.print("[HTTP] Error kirim POST: ");
     Serial.println(http.errorToString(httpResponseCode));
@@ -141,12 +135,12 @@ void setup() {
   delay(1000);
 
   Serial.println("\n=======================================================");
-  Serial.println("  HydroWarn - ESP32 Inisialisasi Dimulai               ");
-  Serial.println("  Fitur: Relay Mati 5 Detik | Spam Notif Selama Bahaya ");
+  Serial.println("  HydroWarn - ESP32 State-Triggered Alert              ");
+  Serial.println("  Logika: Kirim data HANYA SEKALI saat status berubah  ");
   Serial.println("=======================================================");
 
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, RELAY_OFF); // Relay awal kondisi MATI
+  digitalWrite(RELAY_PIN, RELAY_OFF);
 
   dht11.begin();
   dht22.begin();
@@ -164,15 +158,8 @@ void loop() {
 
   unsigned long currentMillis = millis();
 
-  // 1. OTOMATIS MATIKAN RELAY FISIK SETELAH 5 DETIK
-  if (alarmSedangAktif && (currentMillis - waktuAlarmMulai >= DURASI_ALARM_NYALA)) {
-    digitalWrite(RELAY_PIN, RELAY_OFF); // Matikan relay fisik setelah 5 detik
-    alarmSedangAktif = false;
-    Serial.println("\n[TIMER] ⏱️ 5 Detik relay fisik selesai -> RELAY FISIK DIMATIKAN!");
-  }
-
-  // 2. PEMBACAAN SENSOR & PENGIRIMAN DATA (Setiap 5 detik)
-  if (currentMillis - previousMillis >= intervalKirim) {
+  // Pembacaan sensor periodik
+  if (currentMillis - previousMillis >= intervalBacaSensor) {
     previousMillis = currentMillis;
 
     float suhu11 = dht11.readTemperature();
@@ -198,51 +185,48 @@ void loop() {
       sumberSensor = "DHT11 (Fallback)";
     }
 
-    Serial.println("----------------------------------------");
     if (!isnan(suhuAcuan) && !isnan(humAcuan)) {
-      Serial.println("[SENSOR] Sumber: " + sumberSensor);
-      Serial.println("[SENSOR] Suhu: " + String(suhuAcuan, 1) + " °C | Kelembaban: " + String(humAcuan, 1) + " %");
+      // Evaluasi apakah kondisi saat ini masuk zona bahaya
+      bool kondisiBahayaSekarang = (suhuAcuan >= AMBANG_SUHU_TRIGGER || humAcuan >= AMBANG_LEMBAP_TRIGGER);
 
-      // Cek apakah kondisi di atas ambang batas bahaya
-      bool kondisiBahaya = (suhuAcuan >= AMBANG_SUHU_TRIGGER || humAcuan >= AMBANG_LEMBAP_TRIGGER);
-
-      if (kondisiBahaya) {
-        // Jika baru pertama kali terdeteksi bahaya:
-        if (!kondisiBahayaSebelumnya) {
-          digitalWrite(RELAY_PIN, RELAY_ON); // Bunyikan relay fisik selama 5 detik
-          alarmSedangAktif = true;
-          waktuAlarmMulai = millis();
-          kondisiBahayaSebelumnya = true;
-          Serial.println("[STATUS] 🚨 BAHAYA BARU! Relay Fisik ON (Akan mati dalam 5 detik)");
-        } else {
-          Serial.println("[STATUS] 🚨 BAHAYA MASIH AKTIF! Mengirim notifikasi darurat berkala (SPAM)...");
-        }
+      // Terapkan output relay fisik secara langsung
+      if (kondisiBahayaSekarang) {
+        digitalWrite(RELAY_PIN, RELAY_ON);
       } else {
-        // Kondisi telah aman
-        if (kondisiBahayaSebelumnya) {
-          Serial.println("[STATUS] 🛡️ Kondisi SUDAH AMAN. Reset status bahaya.");
-        }
-        kondisiBahayaSebelumnya = false;
-        if (alarmSedangAktif) {
-          digitalWrite(RELAY_PIN, RELAY_OFF);
-          alarmSedangAktif = false;
-        }
+        digitalWrite(RELAY_PIN, RELAY_OFF);
       }
 
-      // CATATAN PENTING:
-      // Selama kondisiBahaya masih TRUE, kita selalu kirim relay=true ke server!
-      // Ini memastikan server terus me-SPAM push notifikasi darurat ke HP/PWA
-      // setiap 5 detik hingga kondisi suhu/kelembaban benar-benar kembali normal.
-      bool statusBahayaUntukServer = kondisiBahaya;
+      // --- LOGIKA EVENT: Hanya eksekusi jika terjadi PERUBAHAN STATUS ---
+      if (kondisiBahayaSekarang != statusBahayaSebelumnya) {
+        if (kondisiBahayaSekarang) {
+          Serial.println("\n[EVENT] 🚨 Transisi: NORMAL -> BAHAYA! Relay ON. Kirim HTTP 1x.");
+          kirimDataJson(suhuAcuan, humAcuan, true);
+        } else {
+          Serial.println("\n[EVENT] 🛡️ Transisi: BAHAYA -> NORMAL! Relay OFF. Kirim HTTP 1x.");
+          kirimDataJson(suhuAcuan, humAcuan, false);
+        }
 
-      // Kirim data ke API Vercel
-      kirimDataJson(suhuAcuan, humAcuan, statusBahayaUntukServer);
+        // Simpan status baru
+        statusBahayaSebelumnya = kondisiBahayaSekarang;
+      } else {
+        // Status masih sama, tidak kirim HTTP (hemat bandwidth & tidak spam notif)
+        Serial.print("[IDLE] Status: ");
+        Serial.print(kondisiBahayaSekarang ? "BAHAYA (Relay ON)" : "AMAN (Relay OFF)");
+        Serial.print(" | Suhu: ");
+        Serial.print(suhuAcuan, 1);
+        Serial.print(" C | Hum: ");
+        Serial.print(humAcuan, 1);
+        Serial.println(" %");
+      }
 
     } else {
       Serial.println("[ERROR] Sensor gagal dibaca!");
-      digitalWrite(RELAY_PIN, RELAY_OFF);
-      alarmSedangAktif = false;
+      // Failsafe: Jika sensor putus saat kondisi bahaya sebelumnya aktif, matikan relay
+      if (statusBahayaSebelumnya) {
+        digitalWrite(RELAY_PIN, RELAY_OFF);
+        statusBahayaSebelumnya = false;
+        Serial.println("[FAILSAFE] Sensor error, relay dimatikan.");
+      }
     }
-    Serial.println("----------------------------------------");
   }
 }

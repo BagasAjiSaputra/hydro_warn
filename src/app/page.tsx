@@ -155,16 +155,6 @@ export default function Home() {
     };
   }, [sensorData?.isAlarmActive, sirenMuted]);
 
-  // Otomatis matikan sirene web setelah 5 detik berbunyi
-  useEffect(() => {
-    if (sensorData?.isAlarmActive && !sirenMuted) {
-      const timer = setTimeout(() => {
-        setSirenMuted(true);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [sensorData?.isAlarmActive, sirenMuted]);
-
   // Push Subscription toggle handler
   const handleToggleSubscription = async () => {
     if (!isSupported) {
@@ -401,8 +391,8 @@ export default function Home() {
                     ALARM KEBAKARAN AKTIF!
                   </h1>
                   <p className="text-red-200 text-sm mt-1 max-w-2xl">
-                    Kondisi sensor mendeteksi ambang batas bahaya (Suhu ≥ 33°C atau Kelembaban ≥ 30%).
-                    Push notification darurat dikirim otomatis ke perangkat PWA terdaftar.
+                    Kondisi sensor mendeteksi ambang batas bahaya (Suhu ≥ 33°C atau Kelembaban ≥ 70%).
+                    Push notification darurat dikirim otomatis ke perangkat PWA terdaftar saat transisi event.
                   </p>
                 </div>
               </div>
@@ -542,7 +532,7 @@ export default function Home() {
               {/* Humidity Card */}
               <div
                 className={`rounded-2xl p-6 border transition-all duration-300 relative overflow-hidden ${
-                  (latest?.humidity ?? 0) >= 30
+                  (latest?.humidity ?? 0) >= 70
                     ? "bg-amber-950/40 border-amber-500/60 shadow-[0_0_25px_rgba(245,158,11,0.2)]"
                     : "bg-zinc-900/60 border-zinc-800"
                 }`}
@@ -569,15 +559,15 @@ export default function Home() {
                 {/* Progress bar threshold */}
                 <div className="mt-4 space-y-1.5">
                   <div className="flex justify-between text-[11px] text-zinc-400">
-                    <span>Ambang Batas: 30%</span>
-                    <span className={(latest?.humidity ?? 0) >= 30 ? "text-amber-400 font-bold" : ""}>
-                      Trigger: ≥ 30.0%
+                    <span>Ambang Batas: 70%</span>
+                    <span className={(latest?.humidity ?? 0) >= 70 ? "text-amber-400 font-bold" : ""}>
+                      Trigger: ≥ 70.0%
                     </span>
                   </div>
                   <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all duration-500 ${
-                        (latest?.humidity ?? 0) >= 30 ? "bg-amber-500" : "bg-blue-500"
+                        (latest?.humidity ?? 0) >= 70 ? "bg-amber-500" : "bg-blue-500"
                       }`}
                       style={{
                         width: `${Math.min(100, Math.max(0, latest?.humidity ?? 0))}%`,
@@ -695,7 +685,7 @@ export default function Home() {
                             </span>
                           </td>
                           <td className="py-3 px-6">
-                            <span className={item.humidity >= 30 ? "text-amber-400 font-bold" : "text-zinc-200"}>
+                            <span className={item.humidity >= 70 ? "text-amber-400 font-bold" : "text-zinc-200"}>
                               {item.humidity.toFixed(1)}%
                             </span>
                           </td>
@@ -766,7 +756,7 @@ export default function Home() {
                 <div>
                   <div className="flex justify-between text-xs font-medium text-zinc-300 mb-1">
                     <span>Kelembaban: {simHumidity}%</span>
-                    <span className="text-zinc-500">Ambang: 30%</span>
+                    <span className="text-zinc-500">Ambang: 70%</span>
                   </div>
                   <input
                     type="range"
@@ -858,7 +848,7 @@ export default function Home() {
                     POST /api/sensor
                   </p>
                   <p className="text-xs text-zinc-400 mt-1">
-                    Atau <code className="text-zinc-300">https://hydrowarn.vercel.app/api/sensor</code>
+                    Atau <code className="text-zinc-300">https://hydro-warn.vercel.app/api/sensor</code>
                   </p>
                 </div>
                 <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800">
@@ -878,10 +868,10 @@ export default function Home() {
                 <div className="bg-zinc-950 rounded-xl p-4 border border-zinc-800 text-xs font-mono overflow-x-auto text-zinc-300">
                   <span className="text-zinc-500">// Ubah baris ini di sketch ESP32 Anda:</span>
                   <div className="text-red-400 mt-1">
-                    - const char* serverUrl = &quot;https://hydrowarn.vercel.app/&quot;;
+                    - const char* serverUrl = &quot;https://hydro-warn.vercel.app/&quot;;
                   </div>
                   <div className="text-emerald-400 mt-1">
-                    + const char* serverUrl = &quot;https://hydrowarn.vercel.app/api/sensor&quot;;
+                    + const char* serverUrl = &quot;https://hydro-warn.vercel.app/api/sensor&quot;;
                   </div>
                 </div>
                 <p className="text-[11px] text-zinc-500">
@@ -894,7 +884,7 @@ export default function Home() {
                 <h4 className="font-semibold text-white">Alur Kerja Notifikasi:</h4>
                 <ol className="list-decimal list-inside space-y-1.5 text-zinc-400">
                   <li>
-                    ESP32 membaca suhu DHT22/DHT11. Jika suhu ≥ 33°C atau kelembaban ≥ 30%, pin relay 18 diaktifkan (LOW) dan <code className="text-zinc-200">relay = true</code>.
+                    ESP32 membaca suhu DHT22/DHT11. Jika suhu ≥ 33°C atau kelembaban ≥ 70%, pin relay 18 diaktifkan (LOW) dan mengirim <code className="text-zinc-200">relay = true</code> saat transisi.
                   </li>
                   <li>
                     ESP32 mengirim POST JSON ke <code className="text-zinc-200">/api/sensor</code>.

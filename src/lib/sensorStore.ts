@@ -40,18 +40,20 @@ export function recordSensorReading(reading: {
   };
 
   const isRelayActive = current.relay;
-  // Deteksi kondisi bahaya: jika relay aktif ATAU suhu >= 33°C ATAU kelembaban >= 30%
-  const isDanger = isRelayActive || current.suhu >= 33.0 || current.humidity >= 30.0;
+  // Ambang batas disesuaikan dengan kode fix ESP32: Suhu >= 33.0°C atau Kelembaban >= 70.0%
+  const isDanger = isRelayActive || current.suhu >= 33.0 || current.humidity >= 70.0;
   const now = Date.now();
 
   let shouldNotify = false;
   let reason = "";
 
-  // SELAMA MASIH BAHAYA: Kirim spam push notif di setiap paket data yang masuk!
+  // Jika ESP32 mengirim relay: true (Transisi Normal -> Bahaya)
   if (isDanger) {
     shouldNotify = true;
-    reason = `BAHAYA MASIH BERLANGSUNG (Suhu: ${current.suhu.toFixed(1)}°C, Kelembaban: ${current.humidity.toFixed(1)}%, Relay: ${isRelayActive ? "ON" : "OFF"}) -> Spam Notifikasi Push`;
+    reason = `🚨 TRANSISI STATUS: BAHAYA TERDETEKSI! Suhu: ${current.suhu.toFixed(1)}°C, Kelembaban: ${current.humidity.toFixed(1)}%, Relay: ON`;
     store.lastAlarmTime = now;
+  } else {
+    reason = `🛡️ TRANSISI STATUS: AMAN. Suhu: ${current.suhu.toFixed(1)}°C, Kelembaban: ${current.humidity.toFixed(1)}%, Relay: OFF`;
   }
 
   // Update store state
@@ -72,7 +74,7 @@ export function getSensorStatus() {
     isAlarmActive: Boolean(
       store.latest?.relay ||
       (store.latest?.suhu !== undefined && store.latest.suhu >= 33.0) ||
-      (store.latest?.humidity !== undefined && store.latest.humidity >= 30.0)
+      (store.latest?.humidity !== undefined && store.latest.humidity >= 70.0)
     ),
     lastAlarmAt: store.lastAlarmTime > 0 ? store.lastAlarmTime : null,
   };
