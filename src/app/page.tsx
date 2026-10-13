@@ -155,6 +155,16 @@ export default function Home() {
     };
   }, [sensorData?.isAlarmActive, sirenMuted]);
 
+  // Otomatis matikan sirene web setelah 5 detik berbunyi
+  useEffect(() => {
+    if (sensorData?.isAlarmActive && !sirenMuted) {
+      const timer = setTimeout(() => {
+        setSirenMuted(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [sensorData?.isAlarmActive, sirenMuted]);
+
   // Push Subscription toggle handler
   const handleToggleSubscription = async () => {
     if (!isSupported) {
